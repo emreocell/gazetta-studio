@@ -26,7 +26,7 @@ import { replaceAssetBytes } from '../../assets/replace-bytes.js'
 import { updateAssetMetadata } from '../../assets/update-metadata.js'
 import { localeManifestVariantFor } from '../../assets/manifest-locale.js'
 import { buildSelector, type Selector } from '../../schema/dimensions.js'
-import { isValidLocale, resolveSiteLocales } from '../../locale.js'
+import { isValidLocale, normalizeLocale, resolveSiteLocales } from '../../locale.js'
 import { isValidTheme } from '../../themes.js'
 import { suggestAltForAsset } from '../../alt/route-handler.js'
 import { respondWithAssetError } from '../error-response.js'
@@ -113,8 +113,9 @@ function metadataLocale(
 ): string | null | ProblemResponse<400> {
   if (locale === undefined) return null
   if (!isValidLocale(locale)) return problem(c, 400, 'BAD_REQUEST', `Invalid locale code: ${locale}`)
+  const code = normalizeLocale(locale)
   const siteDefault = source.manifest ? resolveSiteLocales(source.manifest)?.default : undefined
-  return locale === siteDefault ? null : locale
+  return code === siteDefault ? null : code
 }
 
 /** A language's own alt, or null when it has none and falls back to the default alt. */
