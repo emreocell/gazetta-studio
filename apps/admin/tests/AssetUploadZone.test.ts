@@ -434,6 +434,58 @@ describe('AssetUploadZone', () => {
       }
     })
 
+    it('with French active, suggests in the default language and saves the default alt', async () => {
+      setSiteAndLocale(['en', 'fr'], 'en', 'fr')
+      activateTargetWithAi(true, true)
+      const calls: { url: string; method: string }[] = []
+      const restore = stubFetch((url, init) => {
+        calls.push({ url, method: init?.method ?? 'GET' })
+        if (url.includes('/suggest-alt')) {
+          return new Response(JSON.stringify({ text: 'A cat', refused: false, refusalReason: null }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({ manifest: {} }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      })
+      try {
+        const uploads = useAssetsUploadStore()
+        uploads.configure({
+          uploadAsset: vi.fn(async () => ({ manifest: {} as never, bytesPath: 'assets/x' })),
+        })
+
+        const wrapper = mount(AssetUploadZone)
+        const id = uploads.enqueue(fakeFile('cat.jpg'), 'cat', null)
+        await flushPromises()
+        await flushPromises()
+        await flushPromises()
+
+        const suggest = calls.find(c => c.url.includes('/suggest-alt'))
+        expect(new URL(suggest!.url, 'http://x').searchParams.get('locale')).toBe('en')
+        const save = calls.find(c => c.method === 'PATCH')
+        expect(new URL(save!.url, 'http://x').searchParams.has('locale')).toBe(false)
+        expect(wrapper.find(`[data-testid="upload-${id}-alt-language"]`).text()).toBe('Alt text (English)')
+      } finally {
+        restore()
+      }
+    })
+
+    it('shows no language label on the row while the default language is active', async () => {
+      setSiteAndLocale(['en', 'fr'], 'en', 'en')
+      const uploads = useAssetsUploadStore()
+      uploads.configure({
+        uploadAsset: vi.fn(async () => ({ manifest: {} as never, bytesPath: 'assets/x' })),
+      })
+      const wrapper = mount(AssetUploadZone)
+      const id = uploads.enqueue(fakeFile('cat.jpg'), 'cat', null)
+      await flushPromises()
+      expect(wrapper.find(`[data-testid="upload-${id}-alt"]`).exists()).toBe(true)
+      expect(wrapper.find(`[data-testid="upload-${id}-alt-language"]`).exists()).toBe(false)
+    })
+
     it('shows refusal hint and leaves alt input empty when model declines', async () => {
       activateTargetWithAi(true, true)
       const restore = stubFetch(url => {

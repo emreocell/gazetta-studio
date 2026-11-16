@@ -5,13 +5,15 @@
  * distinction.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { ingestAsset } from '../src/assets/ingest.js'
 import { readManifest } from '../src/assets/manifest.js'
 import { updateAssetMetadata } from '../src/assets/update-metadata.js'
 import { AssetManifestNotFoundError } from '../src/assets/errors.js'
+import { buildSelector } from '../src/schema/dimensions.js'
 import { createContentRoot } from '../src/content-root.js'
 import { createHistoryProvider } from '../src/history-provider.js'
 import { createFilesystemProvider } from '../src/providers/filesystem.js'
@@ -284,5 +286,130 @@ describe('updateAssetMetadata', () => {
       // No history was recorded — same value, no change.
       expect(await history.listRevisions()).toHaveLength(0)
     })
+  })
+})
+
+describe('updateAssetMetadata with a locale selector', () => {
+  const fr = () => buildSelector({ locale: 'fr' })!
+  const frPath = () => join(testDir, 'assets/hero.asset.fr.json')
+  const readFr = async () => JSON.parse(await readFile(frPath(), 'utf8')) as Record<string, unknown>
+
+  it('creates the locale manifest on the first edit and leaves the default alt unchanged', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedAsset('hero', 'Sunset')
+
+    await updateAssetMetadata({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      patch: { alt: 'Coucher' },
+      selector: fr(),
+    })
+
+    expect(await readFr()).toEqual({ version: 1, name: 'hero', alt: 'Coucher' })
+    expect((await readManifest(storage, 'assets', 'hero')).alt).toBe('Sunset')
+  })
+
+  it('updates an existing locale manifest, keeping its byte fields', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedAsset('hero', 'Sunset')
+    const bytesFields = { hash: 'abcd1234', size: 10, mime: 'image/jpeg', width: 4, height: 4, variants: [] }
+    await writeFile(frPath(), JSON.stringify({ version: 1, name: 'hero', ...bytesFields, alt: 'Vieux' }))
+
+    await updateAssetMetadata({ storage, assetsRoot: 'assets', assetName: 'hero', patch: { alt: '' }, selector: fr() })
+
+    expect(await readFr()).toEqual({ version: 1, name: 'hero', ...bytesFields, alt: '' })
+  })
+
+  it('clearing the language alt removes the field and deletes a manifest left empty', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedAsset('hero', 'Sunset')
+    await updateAssetMetadata({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      patch: { alt: 'Coucher' },
+      selector: fr(),
+    })
+
+    await updateAssetMetadata({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      patch: { alt: null },
+      selector: fr(),
+    })
+
+    expect(existsSync(frPath())).toBe(false)
+    expect((await readManifest(storage, 'assets', 'hero')).alt).toBe('Sunset')
+  })
+
+  it('clearing the language alt keeps a manifest that still holds bytes or other metadata', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedAsset('hero')
+    await writeFile(
+      frPath(),
+      JSON.stringify({ version: 1, name: 'hero', alt: 'Coucher', focalPoint: { x: 0.2, y: 0.3 } }),
+    )
+
+    await updateAssetMetadata({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      patch: { alt: null },
+      selector: fr(),
+    })
+
+    expect(await readFr()).toEqual({ version: 1, name: 'hero', focalPoint: { x: 0.2, y: 0.3 } })
+  })
+
+  it('clearing a language that has no manifest writes nothing and records no revision', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedAsset('hero')
+    const history = createHistoryProvider({ storage })
+    const contentRoot = createContentRoot(storage)
+
+    await updateAssetMetadata({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      patch: { alt: null },
+      selector: fr(),
+      history,
+      contentRoot,
+    })
+
+    expect(existsSync(frPath())).toBe(false)
+    expect(await history.listRevisions()).toHaveLength(0)
+  })
+
+  it('records one history revision per language edit', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedAsset('hero')
+    const history = createHistoryProvider({ storage })
+    const contentRoot = createContentRoot(storage)
+
+    await updateAssetMetadata({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      patch: { alt: 'Coucher' },
+      selector: fr(),
+      history,
+      contentRoot,
+      author: 'alice',
+    })
+
+    const revisions = await history.listRevisions()
+    expect(revisions).toHaveLength(2)
+    expect(revisions[0].author).toBe('alice')
+  })
+
+  it('throws AssetManifestNotFoundError when the asset does not exist', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await expect(
+      updateAssetMetadata({ storage, assetsRoot: 'assets', assetName: 'nope', patch: { alt: 'x' }, selector: fr() }),
+    ).rejects.toBeInstanceOf(AssetManifestNotFoundError)
+    expect(existsSync(join(testDir, 'assets/nope.asset.fr.json'))).toBe(false)
   })
 })

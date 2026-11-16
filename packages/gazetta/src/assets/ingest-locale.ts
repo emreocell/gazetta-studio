@@ -12,7 +12,10 @@
  *   - `{name}-{hash}.{selector}.{ext}` — primary bytes for this locale
  *   - `{name}-{hash}.{selector}-{w}w.{ext}` — variant ladder for this locale
  *
- * The default manifest at `{name}.asset.json` is unchanged.
+ * The default manifest at `{name}.asset.json` is unchanged. When the
+ * locale manifest already exists, its metadata (alt, focal point, title,
+ * description) is kept and only its byte fields are replaced
+ * (design-media.md M4).
  *
  * Single responsibility: validate the override candidate, hash + extract
  * dimensions + generate variants, write the locale manifest + bytes.
@@ -52,6 +55,8 @@ import { ASSET_HASH_LENGTH, hashBytes } from './hash.js'
 import { extractImageDimensions } from './image-metadata.js'
 import { mimeCategory } from './kind-compat.js'
 import { assetBytesPath, assetVariantBytesPath, readManifest, writeLocaleManifest } from './manifest.js'
+import { localeManifestVariantFor } from './manifest-locale.js'
+import { withoutByteFields } from './locale-manifest-fields.js'
 import { runAnalyzers } from './analyze.js'
 import { runPreprocessors, type UploadPreprocessor } from './preprocess.js'
 import { sniffMimeFromStream } from './mime-sniff.js'
@@ -192,7 +197,14 @@ export async function ingestLocaleBytes(input: IngestLocaleBytesInput): Promise<
   }))
   const bytesRel = assetBytesPath(input.assetName, hash, bytesExt, input.selector)
   const bytesAbs = `${input.assetsRoot}/${bytesRel}`
+  const existing = await localeManifestVariantFor('embedded').read(
+    input.storage,
+    input.assetsRoot,
+    input.assetName,
+    input.selector,
+  )
   const localeManifest: LocaleBytesOverrideManifest = {
+    ...(existing ? withoutByteFields(existing) : {}),
     version: 1,
     name: input.assetName,
     hash,

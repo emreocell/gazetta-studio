@@ -2015,17 +2015,22 @@ type AssetSummary struct {
 		X float64 `json:"x"`
 		Y float64 `json:"y"`
 	} `json:"focalPoint,omitempty"`
-	Hash            string                     `json:"hash"`
-	Height          nullable.Nullable[float64] `json:"height"`
-	Kind            AssetSummaryKind           `json:"kind"`
-	Mime            string                     `json:"mime"`
-	Name            string                     `json:"name"`
-	OverrideLocales []string                   `json:"overrideLocales"`
-	OverrideThemes  []string                   `json:"overrideThemes"`
-	Poster          nullable.Nullable[string]  `json:"poster,omitempty"`
-	Size            float64                    `json:"size"`
-	UploadedAt      string                     `json:"uploadedAt"`
-	Width           nullable.Nullable[float64] `json:"width"`
+	Hash      string                     `json:"hash"`
+	Height    nullable.Nullable[float64] `json:"height"`
+	Kind      AssetSummaryKind           `json:"kind"`
+	LocaleAlt *struct {
+		Alt    nullable.Nullable[string] `json:"alt"`
+		Locale string                    `json:"locale"`
+	} `json:"localeAlt,omitempty"`
+	Mime                 string                     `json:"mime"`
+	Name                 string                     `json:"name"`
+	OverrideBytesLocales *[]string                  `json:"overrideBytesLocales,omitempty"`
+	OverrideLocales      []string                   `json:"overrideLocales"`
+	OverrideThemes       []string                   `json:"overrideThemes"`
+	Poster               nullable.Nullable[string]  `json:"poster,omitempty"`
+	Size                 float64                    `json:"size"`
+	UploadedAt           string                     `json:"uploadedAt"`
+	Width                nullable.Nullable[float64] `json:"width"`
 }
 
 // AssetSummaryKind defines model for AssetSummary.Kind.
@@ -2237,6 +2242,7 @@ type DeleteApiV1AssetsNameParams struct {
 // GetApiV1AssetsNameParams defines parameters for GetApiV1AssetsName.
 type GetApiV1AssetsNameParams struct {
 	Target *string `form:"target,omitempty" json:"target,omitempty"`
+	Locale *string `form:"locale,omitempty" json:"locale,omitempty"`
 
 	// GazettaRun The agent run this request belongs to: 1 to 64 letters, digits, ".", "_" or "-", other than "." and "..". Recorded on the revision and audit event it writes; anything else answers 400.
 	GazettaRun *GazettaRun `json:"Gazetta-Run,omitempty"`
@@ -2254,6 +2260,7 @@ type PatchApiV1AssetsNameJSONBody struct {
 // PatchApiV1AssetsNameParams defines parameters for PatchApiV1AssetsName.
 type PatchApiV1AssetsNameParams struct {
 	Target *string `form:"target,omitempty" json:"target,omitempty"`
+	Locale *string `form:"locale,omitempty" json:"locale,omitempty"`
 
 	// GazettaRun The agent run this request belongs to: 1 to 64 letters, digits, ".", "_" or "-", other than "." and "..". Recorded on the revision and audit event it writes; anything else answers 400.
 	GazettaRun *GazettaRun `json:"Gazetta-Run,omitempty"`
@@ -8133,6 +8140,18 @@ func NewGetApiV1AssetsNameRequest(server string, name string, params *GetApiV1As
 
 		}
 
+		if params.Locale != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "locale", *params.Locale, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -8211,6 +8230,18 @@ func NewPatchApiV1AssetsNameRequestWithBody(server string, name string, params *
 		if params.Target != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "target", *params.Target, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Locale != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "locale", *params.Locale, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {

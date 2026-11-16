@@ -103,3 +103,16 @@ describe('AssetDetailLocaleSection', () => {
     expect(removeBtn.exists()).toBe(true)
   })
 })
+
+describe('AssetDetailLocaleSection with bytesLocales', () => {
+  it('a language with only its own alt keeps its "+ Add" button and has no override row', () => {
+    setSiteLocales(['en', 'fr', 'ar'], 'en')
+    const wrapper = mount(AssetDetailLocaleSection, {
+      props: { asset: sampleAsset({ overrideLocales: ['ar', 'fr'] }), bytesLocales: ['ar'] },
+    })
+    expect(wrapper.find('[data-testid="locale-row-ar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="locale-row-fr"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="locale-add-fr"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="locale-add-ar"]').exists()).toBe(false)
+  })
+})

@@ -50,6 +50,11 @@ Three behaviors:
 Alt is non-blocking at upload — fill it now, fill it later via the
 detail pane, or override per-use on each page that references the asset.
 
+The upload row always fills the **default language's** alt, even while
+another language is active: the field is then labelled with the default
+language ("Alt text (English)"). Add other languages' alt in the detail
+pane (see "Editing alt").
+
 If AI alt-text is configured for the target (see "AI alt-text"
 below), the input pre-fills with a model-generated description after
 upload. Type into the input to override; the in-flight suggestion
@@ -102,6 +107,21 @@ Uploaded     2026-04-22 14:23
 
 Inline three-state input + "Decorative" checkbox. Commits on blur.
 
+The detail pane edits alt in the **active language**. With the default
+language active, it edits the asset's alt as described above. With
+another language active, say French, the field is labelled
+"Alt text (French)" and edits French alt only:
+
+- **No French alt yet** — the field shows the default alt greyed with
+  "Using English": French pages use the English alt. Click
+  **Copy English to edit** to start from it, or check "Decorative".
+- **Its own French alt** — edit it like the default one; **Clear French
+  alt (use English)** removes it, and French falls back to English again.
+
+French alt is stored in the French version of the asset
+(`hero.asset.fr.json`), next to any French file you uploaded. Adding or
+removing a language's file keeps that language's alt.
+
 When AI alt-text is configured for the active target, a `✨ Suggest`
 button appears below the alt editor. Clicking it asks the configured
 provider to describe the image; the suggestion fills the alt input
@@ -125,9 +145,11 @@ suggestions:
   uploaded before AI was configured, or when a previous suggestion
   was rejected.
 
-Multilingual: the model writes alt directly in the active locale.
-Switching to French in the locale picker and clicking `✨ Suggest`
-returns French alt text.
+Multilingual: the detail pane's `✨ Suggest` writes alt directly in
+the active locale and saves it as that language's alt. Switching to
+French in the locale picker and clicking `✨ Suggest` returns French
+alt text and fills the French alt. Upload-time suggestions fill the
+default alt, so they're always in the default language.
 
 When the model declines (some images trigger provider safety
 filters), the alt stays empty and an inline `✨ AI declined — please
@@ -238,7 +260,8 @@ Click `+ Add fr version` → file picker → upload. The new bytes are
 used for French content; English content keeps using the default.
 
 `Remove override` deletes one locale-bytes variant; that locale falls
-back to the default bytes after removal.
+back to the default bytes after removal. Its alt text, if it has one,
+stays.
 
 ### Library card coverage badge
 

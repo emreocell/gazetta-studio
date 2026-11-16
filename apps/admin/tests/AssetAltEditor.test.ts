@@ -127,3 +127,78 @@ describe('AssetAltEditor', () => {
     expect(wrapper.emitted('update:modelValue')).toBeFalsy()
   })
 })
+
+describe('AssetAltEditor with another language active', () => {
+  const french = (fallback: string | null = 'Mountain sunset') => ({ name: 'French', defaultName: 'English', fallback })
+  function renderFr(modelValue: string | null, fallback: string | null = 'Mountain sunset') {
+    return mount(AssetAltEditor, { props: { modelValue, language: french(fallback) } })
+  }
+
+  it('without its own alt, shows the default alt greyed with "Using English" and "Copy English to edit"', () => {
+    const wrapper = renderFr(null)
+    expect(wrapper.find('[data-testid="alt-editor-language"]').text()).toBe('Alt text (French)')
+    const input = wrapper.find<HTMLInputElement>('[data-testid="alt-editor-input"]')
+    expect(input.element.value).toBe('Mountain sunset')
+    expect(input.element.disabled).toBe(true)
+    expect(wrapper.find('[data-testid="alt-editor-fallback"]').text()).toBe('Using English')
+    expect(wrapper.find('[data-testid="alt-editor-copy-default"]').text()).toBe('Copy English to edit')
+    expect(wrapper.find('[data-testid="alt-editor-clear-language"]').exists()).toBe(false)
+  })
+
+  it('"Copy English to edit" pre-fills an editable field; blur saves it as the French alt', async () => {
+    const wrapper = renderFr(null)
+    await wrapper.find('[data-testid="alt-editor-copy-default"]').trigger('click')
+    const input = wrapper.find<HTMLInputElement>('[data-testid="alt-editor-input"]')
+    expect(input.element.disabled).toBe(false)
+    expect(input.element.value).toBe('Mountain sunset')
+    expect(wrapper.emitted('update:modelValue')).toBeFalsy()
+
+    await input.setValue('Coucher de soleil')
+    await input.trigger('blur')
+    expect(wrapper.emitted('update:modelValue')).toEqual([['Coucher de soleil']])
+  })
+
+  it('blurring the greyed field saves nothing', async () => {
+    const wrapper = renderFr(null)
+    await wrapper.find('[data-testid="alt-editor-input"]').trigger('blur')
+    expect(wrapper.emitted('update:modelValue')).toBeFalsy()
+  })
+
+  it('with its own alt, the field is editable and "Clear French alt (use English)" emits null', async () => {
+    const wrapper = renderFr('Coucher')
+    const input = wrapper.find<HTMLInputElement>('[data-testid="alt-editor-input"]')
+    expect(input.element.value).toBe('Coucher')
+    expect(input.element.disabled).toBe(false)
+    expect(wrapper.find('[data-testid="alt-editor-fallback"]').exists()).toBe(false)
+    const clear = wrapper.find('[data-testid="alt-editor-clear-language"]')
+    expect(clear.text()).toBe('Clear French alt (use English)')
+    await clear.trigger('click')
+    expect(wrapper.emitted('update:modelValue')).toEqual([[null]])
+  })
+
+  it('Decorative saves "" for the language while it falls back', async () => {
+    const wrapper = renderFr(null)
+    await wrapper.find<HTMLInputElement>('[data-testid="alt-editor-decorative"]').setValue(true)
+    expect(wrapper.emitted('update:modelValue')).toEqual([['']])
+  })
+
+  it('a decorative French alt offers the clear action', () => {
+    const wrapper = renderFr('')
+    expect(wrapper.find<HTMLInputElement>('[data-testid="alt-editor-decorative"]').element.checked).toBe(true)
+    expect(wrapper.find('[data-testid="alt-editor-clear-language"]').exists()).toBe(true)
+  })
+
+  it('with no alt in any language, says "Not set — admin will warn" and offers nothing to copy', () => {
+    const wrapper = renderFr(null, null)
+    expect(wrapper.find('[data-testid="alt-editor-state"]').text()).toBe('Not set — admin will warn')
+    expect(wrapper.find('[data-testid="alt-editor-fallback"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="alt-editor-copy-default"]').exists()).toBe(false)
+  })
+
+  it('without a language, shows no language label or language actions', () => {
+    const wrapper = render('Mountain sunset')
+    expect(wrapper.find('[data-testid="alt-editor-language"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="alt-editor-clear-language"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="alt-editor-fallback"]').exists()).toBe(false)
+  })
+})

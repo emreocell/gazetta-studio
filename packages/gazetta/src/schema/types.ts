@@ -300,6 +300,18 @@ export interface AssetSummary {
   poster?: string | null
   uploadedAt: string
   /**
+   * The requested language's own alt text, present only when a request
+   * names a language other than the default. `alt: null` means that
+   * language has none and falls back to `alt` above.
+   */
+  localeAlt?: { locale: string; alt: string | null }
+  /**
+   * Languages with their own file (a locale override with bytes, not
+   * only alt or other metadata). Reported by the single-asset routes,
+   * which read each override; the library listing omits it.
+   */
+  overrideBytesLocales?: readonly string[]
+  /**
    * Locales for which this asset has a manifest override (with or
    * without bytes). Empty array means no locale variants. Detected
    * from sibling `{name}.asset.{locale}.json` files in the same

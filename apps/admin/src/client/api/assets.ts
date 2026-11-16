@@ -201,14 +201,39 @@ export interface AssetMetadataPatch {
   focalPoint?: { x: number; y: number } | null
 }
 
+/** `?locale=` for a language other than the default; empty otherwise. */
+function localeQuery(locale: string | null | undefined): string {
+  return locale ? `?${new URLSearchParams({ locale }).toString()}` : ''
+}
+
+/**
+ * Read one asset. With `locale` (a language other than the default) the
+ * summary carries `localeAlt`, that language's own alt.
+ */
+export async function getAsset(name: string, locale?: string | null): Promise<AssetSummary> {
+  const res = await fetch(apiUrl(`/assets/${encodeURIComponent(name)}${localeQuery(locale)}`), {
+    headers: authHeaders(),
+  })
+  if (res.ok) return (await res.json()) as AssetSummary
+  throw await parseAssetError(res, 'Asset read failed')
+}
+
 /**
  * Update an asset's metadata (alt today; tags, focalPoint, title,
  * description as those land). Returns the updated summary.
  *
+ * With `locale` (a language other than the default) the patch edits
+ * that language's version: `alt: null` removes its own alt so it falls
+ * back to the default alt.
+ *
  * 200 → resolves with the new summary. 400/404/500 throw `AssetApiError`.
  */
-export async function updateAssetMetadata(name: string, patch: AssetMetadataPatch): Promise<AssetSummary> {
-  const res = await fetch(apiUrl(`/assets/${encodeURIComponent(name)}`), {
+export async function updateAssetMetadata(
+  name: string,
+  patch: AssetMetadataPatch,
+  locale?: string | null,
+): Promise<AssetSummary> {
+  const res = await fetch(apiUrl(`/assets/${encodeURIComponent(name)}${localeQuery(locale)}`), {
     method: 'PATCH',
     headers: { ...authHeaders(), 'content-type': 'application/json' },
     body: JSON.stringify(patch),

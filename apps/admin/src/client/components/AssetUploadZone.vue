@@ -11,18 +11,24 @@
  * "prompt for alt at upload" UX lands with the wide rollout.
  */
 import { Upload } from '@lucide/vue'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { suggestAlt, updateAssetMetadata, type SuggestAltResult } from '../api/assets.js'
 import { useAssetsUploadStore } from '../stores/assetsUpload.js'
 import { useAssetsUploadPromptStore } from '../stores/assetsUploadPrompt.js'
 import { useAssetsListStore } from '../stores/assetsList.js'
 import { useLocaleStore } from '../stores/locale.js'
+import { languageName } from '../utils/languageName.js'
 import { useActiveTargetStore } from '../stores/activeTarget.js'
 
 const uploads = useAssetsUploadStore()
 const list = useAssetsListStore()
 const promptStore = useAssetsUploadPromptStore()
 const locale = useLocaleStore()
+
+/** The default language's name, shown on the row's alt field only while another language is active. */
+const defaultLanguageLabel = computed(() =>
+  locale.effectiveLocale && locale.defaultLocale ? languageName(locale.defaultLocale) : null,
+)
 const activeTarget = useActiveTargetStore()
 
 /**
@@ -233,7 +239,8 @@ async function autoSuggestAlt(id: string, assetName: string): Promise<void> {
   aiPending.value.set(id, true)
   let result: SuggestAltResult | null = null
   try {
-    result = await suggestAlt(assetName, locale.activeLocale ?? undefined, controller.signal)
+    // The row fills the default alt, so the suggestion is in the default language (M4).
+    result = await suggestAlt(assetName, locale.defaultLocale ?? undefined, controller.signal)
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       // User typed over the suggestion before it arrived. Silent abort.
@@ -349,10 +356,10 @@ function onAltInput(id: string): void {
       </div>
       <!--
         Inline alt entry — only for successful image uploads of the
-        default asset (locale-bytes overrides inherit alt from the
-        default; per-locale alt would live on the locale manifest, a
-        future surface). Non-blocking: author can fill alt now or close
-        the library and resolve later via the detail-pane editor.
+        default asset. It always fills the default alt, whatever language
+        is active; other languages' alt is edited in the detail pane
+        (design-media.md M4). Non-blocking: author can fill alt now or
+        close the library and resolve later via the detail-pane editor.
       -->
       <div
         v-if="
@@ -360,6 +367,9 @@ function onAltInput(id: string): void {
         "
         class="upload-entry-alt"
         :data-testid="`upload-${entry.id}-alt`">
+        <p v-if="defaultLanguageLabel" class="upload-entry-alt-language" :data-testid="`upload-${entry.id}-alt-language`">
+          Alt text ({{ defaultLanguageLabel }})
+        </p>
         <div class="upload-entry-alt-row">
           <input
             type="text"
@@ -496,6 +506,12 @@ function onAltInput(id: string): void {
   font-size: 0.75rem;
   color: var(--color-muted);
   white-space: nowrap;
+}
+
+.upload-entry-alt-language {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-muted);
 }
 
 .upload-entry-ai-state {
