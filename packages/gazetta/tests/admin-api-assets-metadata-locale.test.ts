@@ -89,6 +89,7 @@ describe('PATCH /api/v1/assets/:name?locale=', () => {
   it.each([
     ['without a locale', ''],
     ['with the default locale', '?locale=en'],
+    ['with the default locale in capitals', '?locale=EN'],
   ])('patches the default manifest %s', async (_label, query) => {
     const res = await patch(query, { alt: 'Dusk' })
 
@@ -98,6 +99,12 @@ describe('PATCH /api/v1/assets/:name?locale=', () => {
     expect(body.manifest.localeAlt).toBeUndefined()
     expect((await readJson('assets/hero.asset.json'))?.alt).toBe('Dusk')
     expect(await readJson('assets/hero.asset.fr.json')).toBeNull()
+  })
+
+  it('writes a capitalised language code to the lowercase file', async () => {
+    expect((await patch('?locale=FR', { alt: 'Coucher' })).status).toBe(200)
+    expect((await readJson('assets/hero.asset.fr.json'))?.alt).toBe('Coucher')
+    expect(await readJson('assets/hero.asset.FR.json')).toBeNull()
   })
 
   it('alt: null clears the French alt, deletes the emptied file and reports the fallback', async () => {
