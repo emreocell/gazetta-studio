@@ -425,7 +425,25 @@
           "uploadedAt": {
             "type": "string"
           },
+          "localeAlt": {
+            "type": "object",
+            "properties": {
+              "locale": {
+                "type": "string"
+              },
+              "alt": {
+                "type": ["string", "null"]
+              }
+            },
+            "required": ["locale", "alt"]
+          },
           "overrideLocales": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "overrideBytesLocales": {
             "type": "array",
             "items": {
               "type": "string"
@@ -7135,6 +7153,14 @@
             "in": "query"
           },
           {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "locale",
+            "in": "query"
+          },
+          {
             "$ref": "#/components/parameters/GazettaRun"
           }
         ],
@@ -7150,7 +7176,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid: ASSET_NAME_INVALID, ASSET_PATH_TRAVERSAL",
+            "description": "The request is invalid: BAD_REQUEST, ASSET_NAME_INVALID, ASSET_PATH_TRAVERSAL",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7218,6 +7244,14 @@
             },
             "required": false,
             "name": "target",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "locale",
             "in": "query"
           },
           {

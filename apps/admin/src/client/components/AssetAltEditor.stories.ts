@@ -67,3 +67,33 @@ export const LongText: Story = {
       'A panoramic landscape photograph at dusk showing rolling hills, a setting sun, and a distant village with smoke rising from chimneys, taken at golden hour with warm tones',
   },
 }
+
+/*
+ * Alt text per language — design-media.md "State tables", "Alt text per
+ * language, in the detail pane (cut 3, M4)". English is the default
+ * language and French the active one. The "Default language active" row
+ * is the stories above; "Suggest with French active" fills the French
+ * alt in AssetDetail (tests/AssetDetail.test.ts) and shows here as
+ * `FrenchOwnAlt`.
+ */
+const french = { name: 'French', defaultName: 'English', fallback: 'Mountain sunset at dusk' }
+
+/** French, no French alt: the English alt greyed, "Using English", "Copy English to edit". */
+export const FrenchFallback: Story = {
+  args: { modelValue: null, language: french },
+}
+
+/** French, own alt: the field is editable, with "Clear French alt (use English)". */
+export const FrenchOwnAlt: Story = {
+  args: { modelValue: 'Coucher de soleil sur la montagne', language: french },
+}
+
+/** French, decorative: the same checkbox as the default language, saved for French only. */
+export const FrenchDecorative: Story = {
+  args: { modelValue: '', language: french },
+}
+
+/** No alt in any language: "Not set — admin will warn", nothing to copy. */
+export const NoAltAnyLanguage: Story = {
+  args: { modelValue: null, language: { ...french, fallback: null } },
+}

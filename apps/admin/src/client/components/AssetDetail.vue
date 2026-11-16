@@ -9,13 +9,15 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import Button from './ui/Button.vue'
 import { formatBytes } from 'gazetta/format'
-import { suggestAlt, updateAssetMetadata, type SuggestAltResult } from '../api/assets.js'
+import type { AssetSummary } from 'gazetta/schema'
+import { getAsset, suggestAlt, updateAssetMetadata, type SuggestAltResult } from '../api/assets.js'
 import { useActiveTargetStore } from '../stores/activeTarget.js'
 import { useAssetsListStore } from '../stores/assetsList.js'
 import { useAssetsSelectionStore } from '../stores/assetsSelection.js'
 import { useAssetsDeleteStore } from '../stores/assetsDelete.js'
 import { useLocaleStore } from '../stores/locale.js'
 import { buildAssetUrl, extFromMime } from '../utils/assetUrl.js'
+import { languageName } from '../utils/languageName.js'
 import AssetAltEditor from './AssetAltEditor.vue'
 import AssetDetailLocaleSection from './AssetDetailLocaleSection.vue'
 import AssetFocalPointEditor from './AssetFocalPointEditor.vue'
@@ -28,20 +30,77 @@ const del = useAssetsDeleteStore()
 const activeTarget = useActiveTargetStore()
 const locale = useLocaleStore()
 
+const asset = computed(() => {
+  if (!selection.selectedName) return null
+  return list.assets.find(a => a.name === selection.selectedName) ?? null
+})
+
 function onDelete(): void {
   if (!asset.value) return
   del.ask(asset.value.name)
 }
 
 /**
- * Commit alt change from the editor. Non-blocking: failures log to
- * console and the list refresh skips. Future: surface via toast.
+ * The selected asset as the single-asset route reports it, in the active
+ * language: its `localeAlt` (design-media.md M4) and the languages that
+ * have their own file. Re-read whenever the list refreshes the asset.
+ */
+const detail = ref<AssetSummary | null>(null)
+
+watch(
+  () => [asset.value, locale.effectiveLocale, activeTarget.activeTargetName] as const,
+  async ([current, lang]) => {
+    if (!current) {
+      detail.value = null
+      return
+    }
+    const name = current.name
+    if (detail.value?.name !== name) detail.value = null
+    try {
+      const summary = await getAsset(name, lang)
+      if (asset.value?.name === name && locale.effectiveLocale === lang) detail.value = summary
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`Failed to read ${name}:`, err)
+    }
+  },
+  { immediate: true },
+)
+
+/**
+ * The active language's own alt while a language other than the default
+ * is active; `alt: null` means it falls back to the default alt.
+ */
+const localeAlt = computed(() => {
+  const lang = locale.effectiveLocale
+  if (!lang || detail.value?.localeAlt?.locale !== lang) return null
+  return detail.value.localeAlt
+})
+
+/** The alt editor's language props, while a language other than the default is active. */
+const altLanguage = computed(() => {
+  const lang = locale.effectiveLocale
+  if (!lang || !asset.value) return null
+  return {
+    name: languageName(lang),
+    defaultName: languageName(locale.defaultLocale ?? 'en'),
+    fallback: asset.value.alt,
+  }
+})
+
+/** What the alt editor edits: the active language's own alt, or the default alt. */
+const altValue = computed(() => (altLanguage.value ? (localeAlt.value?.alt ?? null) : (asset.value?.alt ?? null)))
+
+/**
+ * Commit alt change from the editor, to the active language. Non-blocking:
+ * failures log to console and the list refresh skips. Future: surface via toast.
  */
 async function onAltUpdate(value: string | null): Promise<void> {
   if (!asset.value) return
   const name = asset.value.name
+  const lang = locale.effectiveLocale
   try {
-    await updateAssetMetadata(name, { alt: value })
+    detail.value = await updateAssetMetadata(name, { alt: value }, lang)
     await list.refresh()
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -108,9 +167,9 @@ const aiPending = ref(false)
 const aiRefusalReason = ref<string | null>(null)
 
 /**
- * Trigger an AI alt-text suggestion for the currently-selected asset.
- * On success, commits the suggestion to the manifest via the existing
- * `onAltUpdate` flow — same path as if the author had typed manually.
+ * Trigger an AI alt-text suggestion for the currently-selected asset, in
+ * the active language. On success, commits the suggestion as that
+ * language's alt via `onAltUpdate` — same path as if the author had typed it.
  * Refusals surface inline; transport errors log to console (toast
  * surface is a follow-up).
  */
@@ -136,11 +195,6 @@ async function onSuggestAlt(): Promise<void> {
   }
   await onAltUpdate(result.text)
 }
-
-const asset = computed(() => {
-  if (!selection.selectedName) return null
-  return list.assets.find(a => a.name === selection.selectedName) ?? null
-})
 
 const previewUrl = computed(() => {
   if (!asset.value) return null
@@ -188,7 +242,7 @@ function formatDate(iso: string): string {
         <div v-if="isImage" class="asset-detail-alt">
           <dt>Alt</dt>
           <dd>
-            <AssetAltEditor :model-value="asset.alt" @update:model-value="onAltUpdate" />
+            <AssetAltEditor :model-value="altValue" :language="altLanguage" @update:model-value="onAltUpdate" />
             <div v-if="aiAvailable" class="asset-detail-alt-ai">
               <Button
                 label="✨ Suggest"
@@ -228,7 +282,7 @@ function formatDate(iso: string): string {
           <dd>{{ formatDate(asset.uploadedAt) }}</dd>
         </div>
       </dl>
-      <AssetDetailLocaleSection :asset="asset" />
+      <AssetDetailLocaleSection :asset="asset" :bytes-locales="detail?.overrideBytesLocales" />
       <div class="asset-detail-actions">
         <AssetReplaceButton
           :asset-name="asset.name"

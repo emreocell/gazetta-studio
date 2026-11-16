@@ -103,7 +103,11 @@ export const AssetSummarySchema = z
     animated: z.boolean().optional(),
     poster: z.string().nullable().optional(),
     uploadedAt: z.string(),
+    /** The requested language's own alt; `alt: null` falls back to the default alt. */
+    localeAlt: z.object({ locale: z.string(), alt: z.string().nullable() }).optional(),
     overrideLocales: z.array(z.string()).readonly(),
+    /** Languages with their own file; single-asset routes only. */
+    overrideBytesLocales: z.array(z.string()).readonly().optional(),
     overrideThemes: z.array(z.string()).readonly(),
   })
   .meta({ id: 'AssetSummary' })
@@ -181,6 +185,17 @@ export const AssetMetadataPatchSchema = z.object(
   },
   { error: 'Body must be an object' },
 )
+
+/**
+ * Query of GET and PATCH /api/assets/:name. With a `locale` other than
+ * the site's default, PATCH edits that language's alt and both answer
+ * with its own alt; the handler checks the code.
+ */
+export const AssetMetadataQuerySchema = z.object({
+  target: z.string().optional(),
+  /** BCP 47 locale code, lowercase. */
+  locale: z.string().optional(),
+})
 
 /** Path of the single-asset routes. */
 export const AssetNameParamSchema = z.object({ name: z.string() })

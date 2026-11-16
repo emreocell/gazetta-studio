@@ -24,12 +24,13 @@ import { renameAsset } from '../../assets/rename.js'
 import { replaceAsset } from '../../assets/replace.js'
 import { replaceAssetBytes } from '../../assets/replace-bytes.js'
 import { updateAssetMetadata } from '../../assets/update-metadata.js'
+import { localeManifestVariantFor } from '../../assets/manifest-locale.js'
 import { buildSelector, type Selector } from '../../schema/dimensions.js'
-import { isValidLocale } from '../../locale.js'
+import { isValidLocale, resolveSiteLocales } from '../../locale.js'
 import { isValidTheme } from '../../themes.js'
 import { suggestAltForAsset } from '../../alt/route-handler.js'
 import { respondWithAssetError } from '../error-response.js'
-import { loadSiteFromSource, type SourceContextResolver } from '../source-context.js'
+import { loadSiteFromSource, type SourceContext, type SourceContextResolver } from '../source-context.js'
 import { requireCapability } from '../middleware/capability.js'
 import { requireEditableTarget } from '../middleware/editable-target.js'
 import type { AuditEnv } from '../middleware/audit.js'
@@ -50,6 +51,7 @@ import { apiApp, json, problems } from '../openapi.js'
 import { bodyFailure, jsonBody } from '../route-input.js'
 import {
   AssetMetadataPatchSchema,
+  AssetMetadataQuerySchema,
   AssetMetadataResponseSchema,
   AssetNameParamSchema,
   AssetRenameParamSchema,
@@ -100,6 +102,30 @@ function selectorFromQuery(
 const ASSETS_ROOT = 'assets'
 
 /**
+ * The language a metadata request edits: null for the site's default
+ * language (or no `?locale=`), otherwise the code. Answers 400 for an
+ * invalid code.
+ */
+function metadataLocale(
+  c: Context,
+  source: SourceContext,
+  locale: string | undefined,
+): string | null | ProblemResponse<400> {
+  if (locale === undefined) return null
+  if (!isValidLocale(locale)) return problem(c, 400, 'BAD_REQUEST', `Invalid locale code: ${locale}`)
+  const siteDefault = source.manifest ? resolveSiteLocales(source.manifest)?.default : undefined
+  return locale === siteDefault ? null : locale
+}
+
+/** A language's own alt, or null when it has none and falls back to the default alt. */
+async function localeAltOf(storage: StorageProvider, name: string, locale: string) {
+  const selector = buildSelector({ locale })
+  if (!selector) return { locale, alt: null }
+  const manifest = await localeManifestVariantFor('embedded').read(storage, ASSETS_ROOT, name, selector)
+  return { locale, alt: manifest?.alt ?? null }
+}
+
+/**
  * Answer an asset-domain error as its problem; rethrow anything else so
  * the app's error handler answers a 500.
  */
@@ -116,18 +142,23 @@ function assetProblem<S extends AssetErrorHttpStatus = AssetErrorHttpStatus>(
  * PATCH /api/assets/:name's body checks, run before the schema so a bad
  * body answers the same messages it did before the route had one.
  */
-/** Override locales and themes of an asset, for its summary. */
-async function overridesOf(storage: StorageProvider, manifest: AssetManifest) {
+/**
+ * An asset's summary for the single-asset routes, with its override
+ * locales and themes, and the languages that have their own file.
+ */
+async function summaryOf(storage: StorageProvider, manifest: AssetManifest) {
   const slices = await enumerateOverrideSlices(storage, ASSETS_ROOT, manifest)
   const locales: string[] = []
   const themes: string[] = []
+  const bytesLocales: string[] = []
   for (const slice of slices) {
     const locale = slice.selector.get('locale')
     const theme = slice.selector.get('theme')
     if (locale !== undefined && !locales.includes(locale)) locales.push(locale)
     if (theme !== undefined && !themes.includes(theme)) themes.push(theme)
+    if (locale !== undefined && theme === undefined && slice.bytes !== null) bytesLocales.push(locale)
   }
-  return { locales, themes }
+  return { ...toSummary(manifest, locales, themes), overrideBytesLocales: bytesLocales.sort() }
 }
 
 const listAssetsRoute = createRoute({
@@ -147,11 +178,11 @@ const getAssetRoute = createRoute({
   path: '/assets/:name',
   summary: 'An asset',
   middleware: [requireCapability('read:assets')] as const,
-  request: { params: AssetNameParamSchema, query: TargetQuerySchema },
+  request: { params: AssetNameParamSchema, query: AssetMetadataQuerySchema },
   responses: {
     200: json(AssetSummarySchema, 'The asset, with its override locales and themes'),
     ...problems({
-      400: ['ASSET_NAME_INVALID', 'ASSET_PATH_TRAVERSAL'],
+      400: ['BAD_REQUEST', 'ASSET_NAME_INVALID', 'ASSET_PATH_TRAVERSAL'],
       401: ['UNAUTHENTICATED'],
       403: ['FORBIDDEN'],
       404: ['ASSET_MANIFEST_NOT_FOUND'],
@@ -194,7 +225,7 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
     ] as const,
     request: {
       params: AssetNameParamSchema,
-      query: TargetQuerySchema,
+      query: AssetMetadataQuerySchema,
       body: { required: true, content: { 'application/json': { schema: AssetMetadataPatchSchema } } },
     },
     responses: {
@@ -496,15 +527,19 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
 
   app.openapi(getAssetRoute, async c => {
     const { name } = c.req.valid('param')
-    const source = await resolve(c.req.valid('query').target)
+    const query = c.req.valid('query')
+    const source = await resolve(query.target)
+    const locale = metadataLocale(c, source, query.locale)
+    if (locale instanceof Response) return locale
     try {
       const manifest = await readManifest(source.storage, ASSETS_ROOT, name)
       // Single-asset GET — discover overrides via the targeted scan.
       // Cheaper than the full list scan (one readDir of the asset's
       // parent dir) and gives the detail pane its locale chips without
       // a second round-trip.
-      const { locales, themes } = await overridesOf(source.storage, manifest)
-      return c.json(toSummary(manifest, locales, themes), 200)
+      const summary = await summaryOf(source.storage, manifest)
+      if (locale !== null) summary.localeAlt = await localeAltOf(source.storage, name, locale)
+      return c.json(summary, 200)
     } catch (err) {
       return assetProblem<400 | 404 | 500>(c, err)
     }
@@ -514,8 +549,12 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
     patchAssetRoute,
     async c => {
       const { name } = c.req.valid('param')
-      const source = await resolve(c.req.valid('query').target)
+      const query = c.req.valid('query')
+      const source = await resolve(query.target)
+      const locale = metadataLocale(c, source, query.locale)
+      if (locale instanceof Response) return locale
       // The schema keeps only `alt` and `focalPoint`, each when present.
+      // With a language, `alt: null` removes that language's own alt.
       const patch = c.req.valid('json')
 
       try {
@@ -524,13 +563,15 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
           assetsRoot: ASSETS_ROOT,
           assetName: name,
           patch,
+          selector: locale === null ? null : buildSelector({ locale }),
           history: source.history,
           contentRoot: source.contentRoot,
         })
         // Re-summarize with override locales so the client refresh shape
         // matches GET. Single-asset case uses the same enumerator.
-        const { locales, themes } = await overridesOf(source.storage, updated)
-        return c.json({ manifest: toSummary(updated, locales, themes) }, 200)
+        const summary = await summaryOf(source.storage, updated)
+        if (locale !== null) summary.localeAlt = await localeAltOf(source.storage, name, locale)
+        return c.json({ manifest: summary }, 200)
       } catch (err) {
         return assetProblem<400 | 404 | 500>(c, err)
       }
@@ -670,9 +711,8 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
       if (hooks && hookCtx) {
         await dispatchAfterUpload(hooks, hookAsset, { asset: hookAsset, hash: result.manifest.hash ?? '' }, hookCtx)
       }
-      const { locales, themes } = await overridesOf(source.storage, result.manifest)
       return c.json(
-        { manifest: toSummary(result.manifest, locales, themes), perUseAltCount: result.perUseAltCount },
+        { manifest: await summaryOf(source.storage, result.manifest), perUseAltCount: result.perUseAltCount },
         200,
       )
     } catch (err) {

@@ -241,7 +241,12 @@ describe('Replace file in AssetDetail', () => {
 
   function deferredFetch() {
     let resolve!: (r: Response) => void
-    const fetch = vi.fn(() => new Promise<Response>(r => (resolve = r)))
+    // Only the replace waits; the detail pane's own reads answer at once.
+    const fetch = vi.fn((input: RequestInfo | URL) =>
+      String(input).includes('/replace-file')
+        ? new Promise<Response>(r => (resolve = r))
+        : Promise.resolve(new Response(JSON.stringify(summary()), { status: 200 })),
+    )
     const reply = () =>
       resolve(
         new Response(JSON.stringify({ manifest: summary(), perUseAltCount: 0 }), {

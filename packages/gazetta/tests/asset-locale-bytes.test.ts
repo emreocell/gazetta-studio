@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { deleteAsset } from '../src/assets/delete.js'
@@ -331,5 +331,87 @@ describe('deleteAsset cascades through overrides', () => {
     expect(existsSync(join(testDir, 'assets/hero.asset.json'))).toBe(false)
     expect(existsSync(join(testDir, overrideResult.bytesPath))).toBe(false)
     expect(existsSync(join(testDir, 'assets/hero.asset.fr.json'))).toBe(false)
+  })
+})
+
+describe('language versions keep their metadata', () => {
+  const fr = () => buildSelector({ locale: 'fr' })!
+  const frPath = () => join(testDir, 'assets/hero.asset.fr.json')
+  const readFr = async () => JSON.parse(await readFile(frPath(), 'utf8')) as Record<string, unknown>
+
+  it('uploading French bytes keeps the alt the French manifest already had', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedDefaultAsset('hero')
+    await writeFile(frPath(), JSON.stringify({ version: 1, name: 'hero', alt: 'Coucher', title: 'Titre' }))
+
+    const result = await ingestLocaleBytes({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      selector: fr(),
+      bytes: streamOf(new Uint8Array(await jpeg())),
+    })
+
+    const written = await readFr()
+    expect(written.alt).toBe('Coucher')
+    expect(written.title).toBe('Titre')
+    expect(written.hash).toBe(result.manifest.hash)
+  })
+
+  it('uploading French bytes again replaces the old byte fields', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedDefaultAsset('hero')
+    const first = await ingestLocaleBytes({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      selector: fr(),
+      bytes: streamOf(new Uint8Array(await jpeg(16, 16))),
+    })
+    const second = await ingestLocaleBytes({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      selector: fr(),
+      bytes: streamOf(new Uint8Array(await png(24, 24))),
+    })
+
+    expect(second.manifest.hash).not.toBe(first.manifest.hash)
+    const written = await readFr()
+    expect(written).toMatchObject({ hash: second.manifest.hash, mime: 'image/png', width: 24, height: 24 })
+  })
+
+  it('removing French bytes keeps a manifest that still holds alt, without byte fields', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedDefaultAsset('hero')
+    await writeFile(frPath(), JSON.stringify({ version: 1, name: 'hero', alt: 'Coucher' }))
+    const result = await ingestLocaleBytes({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      selector: fr(),
+      bytes: streamOf(new Uint8Array(await jpeg())),
+    })
+
+    await removeOverride({ storage, assetsRoot: 'assets', siteDir: '', assetName: 'hero', selector: fr() })
+
+    expect(existsSync(join(testDir, result.bytesPath))).toBe(false)
+    expect(await readFr()).toEqual({ version: 1, name: 'hero', alt: 'Coucher' })
+  })
+
+  it('removing French bytes deletes a manifest that held only bytes', async () => {
+    const storage = createFilesystemProvider(testDir)
+    await seedDefaultAsset('hero')
+    await ingestLocaleBytes({
+      storage,
+      assetsRoot: 'assets',
+      assetName: 'hero',
+      selector: fr(),
+      bytes: streamOf(new Uint8Array(await jpeg())),
+    })
+
+    await removeOverride({ storage, assetsRoot: 'assets', siteDir: '', assetName: 'hero', selector: fr() })
+
+    expect(existsSync(frPath())).toBe(false)
   })
 })

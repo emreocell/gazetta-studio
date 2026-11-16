@@ -4,13 +4,17 @@
  * Author-facing semantics (design-media.md → "Remove French bytes
  * override"):
  *   "Always allowed; locale bytes overrides don't own refs independently.
- *    Effect: deletes locale bytes + variants + manifest. The locale
- *    falls back to default bytes — no broken refs, no code changes in
- *    referring pages."
+ *    Effect: deletes locale bytes + variants. The locale falls back to
+ *    default bytes — no broken refs, no code changes in referring pages."
+ *
+ * The override manifest keeps its metadata (alt, focal point, title,
+ * description) with the byte fields dropped; it's deleted only when no
+ * metadata is left (design-media.md M4).
  *
  * Single responsibility: delete the override slice cleanly. Owns:
  *   - resolve the override slice from `enumerateAssetStoragePaths`
- *   - rm the slice's manifest + bytes + variants in safe order
+ *   - rm the slice's bytes + variants, then drop its manifest's byte
+ *     fields (or the whole manifest when nothing else is in it)
  *   - record one history revision
  *
  * Does NOT own: HTTP, default-asset operations, ref scanning (overrides
@@ -25,7 +29,9 @@ import { createContentRoot } from '../content-root.js'
 import { rmIgnoreMissing } from '../providers/_rm-ignore-missing.js'
 import { enumerateAssetStoragePaths } from './asset-paths.js'
 import { AssetManifestNotFoundError, AssetStorageError } from './errors.js'
-import { readManifest } from './manifest.js'
+import { readManifest, writeLocaleManifest } from './manifest.js'
+import { localeManifestVariantFor } from './manifest-locale.js'
+import { overrideHasContent, withoutByteFields } from './locale-manifest-fields.js'
 
 export interface RemoveOverrideInput {
   storage: StorageProvider
@@ -61,15 +67,25 @@ export async function removeOverride(input: RemoveOverrideInput): Promise<void> 
   // last. If interrupted mid-rm, an orphan manifest pointing at missing
   // bytes is the resolver-degrades-gracefully case; the reverse leaves
   // bytes the resolver can never reach (future GC reclaims).
-  const orderedPaths: string[] = []
-  if (slice.bytes !== null) orderedPaths.push(slice.bytes)
-  orderedPaths.push(...slice.variants)
-  orderedPaths.push(slice.manifest)
+  const bytePaths: string[] = []
+  if (slice.bytes !== null) bytePaths.push(slice.bytes)
+  bytePaths.push(...slice.variants)
+
+  const existing = await localeManifestVariantFor('embedded').read(
+    input.storage,
+    input.assetsRoot,
+    input.assetName,
+    input.selector,
+  )
+  const remaining = existing ? withoutByteFields(existing) : null
+  const keepManifest = remaining !== null && overrideHasContent(remaining)
+  const orderedPaths = keepManifest ? bytePaths : [...bytePaths, slice.manifest]
 
   const contentRoot = input.contentRoot ?? createContentRoot(input.storage, input.siteDir)
 
   if (input.history) {
     const items: WrittenItem[] = orderedPaths.map(path => ({ path, content: null }))
+    if (keepManifest) items.push({ path: slice.manifest, content: `${JSON.stringify(remaining, null, 2)}\n` })
     await recordWrite({
       history: input.history,
       contentRoot,
@@ -86,5 +102,8 @@ export async function removeOverride(input: RemoveOverrideInput): Promise<void> 
     } catch (err) {
       throw new AssetStorageError('delete', path, err)
     }
+  }
+  if (keepManifest) {
+    await writeLocaleManifest(input.storage, input.assetsRoot, input.assetName, input.selector, remaining)
   }
 }

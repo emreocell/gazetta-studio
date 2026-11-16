@@ -32,6 +32,12 @@ import { removeLocaleOverride } from '../api/assets.js'
 const props = defineProps<{
   /** The asset whose locale section we're rendering. */
   asset: AssetSummary
+  /**
+   * Languages with their own file, from the single-asset route. A
+   * language with only its own alt isn't a file version, so it keeps its
+   * "+ Add … version" button. Until it's known, `overrideLocales` stands in.
+   */
+  bytesLocales?: readonly string[]
 }>()
 
 const uploads = useAssetsUploadStore()
@@ -49,9 +55,9 @@ const nonDefaultLocales = computed<readonly string[]>(() => {
   return all.filter(l => l !== locale.defaultLocale)
 })
 
-const overrideLocales = computed(() => new Set(props.asset.overrideLocales))
+const fileLocales = computed(() => props.bytesLocales ?? props.asset.overrideLocales)
 
-const missingLocales = computed(() => nonDefaultLocales.value.filter(l => !overrideLocales.value.has(l)))
+const missingLocales = computed(() => nonDefaultLocales.value.filter(l => !fileLocales.value.includes(l)))
 
 const fileInputs = new Map<string, HTMLInputElement>()
 function setInputRef(localeCode: string, el: HTMLInputElement | null) {
@@ -111,7 +117,7 @@ if (uploads) {
     </div>
 
     <div
-      v-for="localeCode in asset.overrideLocales"
+      v-for="localeCode in fileLocales"
       :key="localeCode"
       class="locale-row"
       :data-testid="`locale-row-${localeCode}`">

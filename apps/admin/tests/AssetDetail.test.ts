@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import AssetDetail from '../src/client/components/AssetDetail.vue'
 import { useActiveTargetStore } from '../src/client/stores/activeTarget.js'
 import { useAssetsListStore } from '../src/client/stores/assetsList.js'
 import { useAssetsSelectionStore } from '../src/client/stores/assetsSelection.js'
+import { useLocaleStore } from '../src/client/stores/locale.js'
+import { useSiteStore } from '../src/client/stores/site.js'
 import type { AssetSummary } from '../src/client/api/client.js'
 
 function sample(overrides: Partial<AssetSummary> = {}): AssetSummary {
@@ -271,5 +273,117 @@ describe('AssetDetail', () => {
       // so the suggest button never gets rendered.
       expect(wrapper.find('[data-testid="asset-detail-suggest-alt"]').exists()).toBe(false)
     })
+  })
+})
+
+describe('AssetDetail alt in the active language', () => {
+  type Call = { url: string; method: string; body?: string }
+  let calls: Call[]
+  let restoreFetch: () => void
+
+  function stubFetch(frenchAlt: string | null) {
+    calls = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/suggest-alt')) return json({ text: 'Coucher suggéré', refused: false, refusalReason: null })
+      const locale = new URL(url, 'http://x').searchParams.get('locale')
+      if (method === 'PATCH') {
+        const alt = (JSON.parse(String(init?.body)) as { alt: string | null }).alt
+        if (locale) frenchAlt = alt
+        return json({ manifest: sample(locale ? { localeAlt: { locale, alt } } : { alt }) })
+      }
+      if (url.includes('/assets/hero')) return json(sample(locale ? { localeAlt: { locale, alt: frenchAlt } } : {}))
+      return json([sample()])
+    }) as typeof globalThis.fetch
+    restoreFetch = () => {
+      globalThis.fetch = original
+    }
+  }
+
+  function setup(active: string, frenchAlt: string | null = null) {
+    stubFetch(frenchAlt)
+    const site = useSiteStore()
+    site.manifest = {
+      name: 'test',
+      locales: { default: 'en', supported: ['en', 'fr'] },
+    } as unknown as typeof site.manifest
+    useLocaleStore().setLocale(active)
+    const targets = useActiveTargetStore()
+    targets.targets = [
+      {
+        name: 'local',
+        environment: 'local',
+        type: 'static',
+        editable: true,
+        altText: { available: true, auto: false },
+      },
+    ]
+    targets.activeTargetName = 'local'
+    useAssetsListStore().assets = [sample()]
+    useAssetsSelectionStore().select('hero')
+    return mount(AssetDetail)
+  }
+
+  const patches = () => calls.filter(c => c.method === 'PATCH')
+  const localeOf = (c: Call) => new URL(c.url, 'http://x').searchParams.get('locale')
+
+  afterEach(() => restoreFetch())
+
+  it('with French active and no French alt, shows the default greyed with "Using English"', async () => {
+    const wrapper = setup('fr', null)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="alt-editor-language"]').text()).toBe('Alt text (French)')
+    expect(wrapper.find<HTMLInputElement>('[data-testid="alt-editor-input"]').element.value).toBe('Mountain sunset')
+    expect(wrapper.find('[data-testid="alt-editor-fallback"]').text()).toBe('Using English')
+  })
+
+  it('with a French alt, edits it and sends the alt with locale=fr', async () => {
+    const wrapper = setup('fr', 'Coucher')
+    await flushPromises()
+    const input = wrapper.find<HTMLInputElement>('[data-testid="alt-editor-input"]')
+    expect(input.element.value).toBe('Coucher')
+
+    await input.setValue('Coucher de soleil')
+    await input.trigger('blur')
+    await flushPromises()
+
+    expect(patches()).toHaveLength(1)
+    expect(localeOf(patches()[0])).toBe('fr')
+    expect(JSON.parse(patches()[0].body!)).toEqual({ alt: 'Coucher de soleil' })
+  })
+
+  it('accepting an AI suggestion with French active saves it as the French alt', async () => {
+    const wrapper = setup('fr', null)
+    await flushPromises()
+    await wrapper.find('[data-testid="asset-detail-suggest-alt"]').trigger('click')
+    await flushPromises()
+
+    const suggest = calls.find(c => c.url.includes('/suggest-alt'))!
+    expect(localeOf(suggest)).toBe('fr')
+    expect(patches()).toHaveLength(1)
+    expect(localeOf(patches()[0])).toBe('fr')
+    expect(JSON.parse(patches()[0].body!)).toEqual({ alt: 'Coucher suggéré' })
+    expect(wrapper.find<HTMLInputElement>('[data-testid="alt-editor-input"]').element.value).toBe('Coucher suggéré')
+  })
+
+  it('with the default language active, sends no locale and shows no language label', async () => {
+    const wrapper = setup('en')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="alt-editor-language"]').exists()).toBe(false)
+    const input = wrapper.find<HTMLInputElement>('[data-testid="alt-editor-input"]')
+    await input.setValue('Dusk')
+    await input.trigger('blur')
+    await flushPromises()
+
+    expect(patches()).toHaveLength(1)
+    expect(localeOf(patches()[0])).toBeNull()
+    const reads = calls.filter(c => c.method === 'GET' && c.url.includes('/assets/hero'))
+    expect(reads.length).toBeGreaterThan(0)
+    expect(reads.every(c => localeOf(c) === null)).toBe(true)
   })
 })
