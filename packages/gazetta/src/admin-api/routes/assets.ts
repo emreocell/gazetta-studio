@@ -93,9 +93,25 @@ function selectorFromQuery(
     return problem(c, 400, 'BAD_REQUEST', `Invalid theme code: ${theme}`)
   }
   return buildSelector({
-    ...(locale !== undefined ? { locale } : {}),
+    ...(locale !== undefined ? { locale: normalizeLocale(locale) } : {}),
     ...(theme !== undefined ? { theme } : {}),
   })
+}
+
+/**
+ * Answer 400 when the site lists its languages and `code` (already
+ * lowercase) is not one of them: a file for it would never be read. A site
+ * that lists no languages accepts any valid code.
+ */
+function unknownSiteLocale(c: Context, source: SourceContext, code: string): ProblemResponse<400> | null {
+  const locales = source.manifest ? resolveSiteLocales(source.manifest) : null
+  if (!locales || code === locales.default || locales.supported.includes(code)) return null
+  return problem(
+    c,
+    400,
+    'BAD_REQUEST',
+    `Locale ${code} is not one of the site's languages: ${locales.supported.join(', ')}`,
+  )
 }
 
 /** Where assets live, relative to the target storage root. */
@@ -554,6 +570,10 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
       const source = await resolve(query.target)
       const locale = metadataLocale(c, source, query.locale)
       if (locale instanceof Response) return locale
+      if (query.locale !== undefined) {
+        const unknown = unknownSiteLocale(c, source, normalizeLocale(query.locale))
+        if (unknown) return unknown
+      }
       // The schema keeps only `alt` and `focalPoint`, each when present.
       // With a language, `alt: null` removes that language's own alt.
       const patch = c.req.valid('json')
@@ -797,6 +817,9 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
     }
 
     const source = await resolve(query.target)
+    const selectedLocale = selectorOrErr.get('locale')
+    const unknown = selectedLocale === undefined ? null : unknownSiteLocale(c, source, selectedLocale)
+    if (unknown) return unknown
     const file = c.req.valid('form').file
     if (!(file instanceof File)) {
       return problem(c, 400, 'BAD_REQUEST', 'Missing or invalid "file" field')
@@ -832,6 +855,9 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
     }
 
     const source = await resolve(query.target)
+    const selectedLocale = selectorOrErr.get('locale')
+    const unknown = selectedLocale === undefined ? null : unknownSiteLocale(c, source, selectedLocale)
+    if (unknown) return unknown
     try {
       await removeOverride({
         storage: source.storage,
