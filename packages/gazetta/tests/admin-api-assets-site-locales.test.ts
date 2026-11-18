@@ -18,8 +18,8 @@ import { memoryStorage, type MemoryStorage } from './_helpers/memory-storage.js'
 let app: Hono
 let storage: MemoryStorage
 
-function buildApp(locales: SiteManifest['locales']) {
-  storage = memoryStorage()
+function buildApp(locales: SiteManifest['locales'], existing?: MemoryStorage) {
+  storage = existing ?? memoryStorage()
   const targetConfigs = {
     local: { storage, type: 'esi' as const, environment: 'local' as const, editable: true },
   }
@@ -115,8 +115,20 @@ describe('a site that lists English and French', () => {
     expect(languageFiles()).toEqual([])
   })
 
-  it('DELETE locale-bytes ?locale=de answers 400 naming the site languages', async () => {
-    await expectUnlisted(await deleteBytes('?locale=de'), 'de')
+  it('DELETE locale-bytes ?locale=de answers 404 when there is no such override', async () => {
+    const res = await deleteBytes('?locale=de')
+
+    expect(res.status).toBe(404)
+  })
+
+  it('DELETE still removes an override whose language the site has since dropped', async () => {
+    expect((await postBytes('?locale=fr')).status).toBe(201)
+    buildApp({ default: 'en', supported: ['en'] }, storage)
+
+    const res = await deleteBytes('?locale=fr')
+
+    expect(res.status).toBe(204)
+    expect(languageFiles()).toEqual([])
   })
 
   it('names the lowercase code when the unlisted one is typed in capitals', async () => {
@@ -167,5 +179,17 @@ describe('a site whose default language is not in its supported list', () => {
 
     expect((await patchAlt('?locale=fr')).status).toBe(200)
     expect((await postBytes('?locale=fr')).status).toBe(201)
+  })
+
+  it('names the default language too when it refuses another one', async () => {
+    buildApp({ default: 'fr', supported: ['en'] })
+    await uploadHero()
+
+    const res = await patchAlt('?locale=de')
+
+    expect(res.status).toBe(400)
+    expect(ErrorResponseSchema.parse(await res.json()).detail).toBe(
+      "Locale de is not one of the site's languages: fr, en",
+    )
   })
 })
