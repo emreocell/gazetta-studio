@@ -101,17 +101,18 @@ function selectorFromQuery(
 /**
  * Answer 400 when the site lists its languages and `code` (already
  * lowercase) is not one of them: a file for it would never be read. A site
- * that lists no languages accepts any valid code.
+ * that lists no languages accepts any valid code. Used by the routes that
+ * write a language's file; DELETE does not use it, so an override left over
+ * from a language the site has since dropped can still be removed.
  */
 function unknownSiteLocale(c: Context, source: SourceContext, code: string): ProblemResponse<400> | null {
   const locales = source.manifest ? resolveSiteLocales(source.manifest) : null
   if (!locales || code === locales.default || locales.supported.includes(code)) return null
-  return problem(
-    c,
-    400,
-    'BAD_REQUEST',
-    `Locale ${code} is not one of the site's languages: ${locales.supported.join(', ')}`,
-  )
+  // The default is accepted above, so name it even when `supported` leaves it out.
+  const listed = locales.supported.includes(locales.default)
+    ? locales.supported
+    : [locales.default, ...locales.supported]
+  return problem(c, 400, 'BAD_REQUEST', `Locale ${code} is not one of the site's languages: ${listed.join(', ')}`)
 }
 
 /** Where assets live, relative to the target storage root. */
@@ -227,7 +228,7 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
    *
    * Responses:
    *   200 OK            — { manifest }  (updated summary)
-   *   400 Bad Request   — alt isn't string|null
+   *   400 Bad Request   — alt isn't string|null, or ?locale= isn't a language the site lists
    *   404 Not Found     — asset missing
    *   500 Storage       — underlying write failed
    */
@@ -429,7 +430,7 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
    *
    * Responses:
    *   201 Created           — { manifest, bytesPath }
-   *   400 Bad Request       — invalid selector or empty selector
+   *   400 Bad Request       — invalid or empty selector, or a locale the site doesn't list
    *   404 Not Found         — asset doesn't exist
    *   409 Kind Mismatch     — override MIME category differs from default
    *   500 Storage Failure   — underlying write failed
@@ -855,9 +856,6 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
     }
 
     const source = await resolve(query.target)
-    const selectedLocale = selectorOrErr.get('locale')
-    const unknown = selectedLocale === undefined ? null : unknownSiteLocale(c, source, selectedLocale)
-    if (unknown) return unknown
     try {
       await removeOverride({
         storage: source.storage,
