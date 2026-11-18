@@ -155,6 +155,26 @@ describe('a site that lists English and French', () => {
     expect(languageFiles()).toEqual([])
   })
 
+  it('DELETE locale-bytes ?locale=FR still removes an override stored with a capital code', async () => {
+    expect((await postBytes('?locale=fr')).status).toBe(201)
+    // What the route wrote before it lowercased the code.
+    const legacy = new Map<string, Uint8Array>()
+    for (const [path, bytes] of storage.dump()) {
+      if (path.startsWith('assets/') && /\.fr\./.test(path)) {
+        storage.seedBytes({ [path.replace(/\.fr\./, '.FR.')]: bytes })
+        legacy.set(path, bytes)
+      }
+    }
+    for (const path of legacy.keys()) await storage.rm(path)
+    expect(languageFiles().length).toBeGreaterThan(0)
+    expect(languageFiles().every(p => p.includes('.FR.'))).toBe(true)
+
+    const res = await deleteBytes('?locale=FR')
+
+    expect(res.status).toBe(204)
+    expect(languageFiles()).toEqual([])
+  })
+
   it('still accepts a listed language on PATCH', async () => {
     expect((await patchAlt('?locale=fr')).status).toBe(200)
   })
