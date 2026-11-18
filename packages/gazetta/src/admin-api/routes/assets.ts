@@ -44,7 +44,7 @@ import {
   type UploadHookAsset,
 } from '../../hooks/index.js'
 import { makeAuditFiringEmitter } from '../hook-audit-emitter.js'
-import type { AssetErrorHttpStatus } from '../../assets/errors.js'
+import { AssetManifestNotFoundError, type AssetErrorHttpStatus } from '../../assets/errors.js'
 import type { AssetManifest } from '../../schema/types.js'
 import type { StorageProvider } from '../../types.js'
 import { apiApp, json, problems } from '../openapi.js'
@@ -856,17 +856,32 @@ export function assetRoutes(resolve: SourceContextResolver, opts: AssetRoutesOpt
     }
 
     const source = await resolve(query.target)
-    try {
-      await removeOverride({
+    const selector = selectorOrErr
+    const remove = (sel: Selector) =>
+      removeOverride({
         storage: source.storage,
         assetsRoot: ASSETS_ROOT,
         siteDir: source.siteDir,
         assetName: name,
-        selector: selectorOrErr,
+        selector: sel,
         history: source.history,
         contentRoot: source.contentRoot,
         author: '',
       })
+    try {
+      try {
+        await remove(selector)
+      } catch (err) {
+        // Before the code was lowercased, ?locale=FR wrote `.FR` files that
+        // no page reads. Match those as typed so they can still be deleted.
+        const typed = query.locale
+        if (!(err instanceof AssetManifestNotFoundError) || typed === undefined || typed === normalizeLocale(typed)) {
+          throw err
+        }
+        const asTyped = buildSelector({ locale: typed, ...(query.theme !== undefined ? { theme: query.theme } : {}) })
+        if (asTyped === null) throw err
+        await remove(asTyped)
+      }
       return c.body(null, 204)
     } catch (err) {
       return assetProblem<400 | 404 | 500>(c, err)
